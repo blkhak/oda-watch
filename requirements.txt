@@ -1,0 +1,2 @@
+python-hwpx==6.9.0
+holidays==0.107
