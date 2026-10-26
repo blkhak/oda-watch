@@ -40,7 +40,7 @@ def ca_bundle(url):
 
 def get(url, timeout=60, retries=3):
     for attempt in range(retries):
-        r = subprocess.run(["curl", "-s", "-L", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
+        r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
                            capture_output=True)
         if r.returncode == 0 and r.stdout:
             return r.stdout.decode("utf-8", "replace")
