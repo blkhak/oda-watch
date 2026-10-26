@@ -79,7 +79,8 @@ def find_chat(token):
             return f.read().strip()
     ids = telegram.chat_ids(token)
     if len(ids) != 1:
-        sys.exit(f"대화방을 정할 수 없음(찾은 수 {len(ids)}): 봇에게 메시지를 한 번 보내고 다시 실행하세요")
+        bot = telegram._call(token, "getMe", {}).get("username")
+        sys.exit(f"대화방을 정할 수 없음(찾은 수 {len(ids)}): @{bot} 에게 메시지를 한 번 보내고 다시 실행하세요")
     os.makedirs(os.path.dirname(CHAT_FILE), exist_ok=True)
     with open(CHAT_FILE, "w", encoding="utf-8") as f:
         f.write(str(ids[0][0]))
