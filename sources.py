@@ -163,17 +163,23 @@ def kenca():
     return out
 
 
-# ── 나라장터: 수요기관이 한국수출입은행인 입찰공고 (용역·물품·공사) ──────────────────────
+# ── 나라장터: 수요기관이 한국수출입은행인 입찰공고 (용역·물품·공사) 중 해외사업만 ─────────────
 G2B_DEMAND = "한국수출입은행"
+# 해외사업: 국가명·해외·ODA·EDCF 등(overseas.py) 또는 아래 낱말이 들어간 공고
+G2B_KEEP = re.compile(r"대외경제협력기금|PMA|Project Management|원조|개도국|협력국")
+# 은행 내부 구매·운영 공고 (EDCF 외화금고 시스템처럼 해외 낱말이 들어가도 내부 업무면 뺀다)
+G2B_INTERNAL = re.compile(r"시스템\s*(구축|개발|고도화)|감리|외화금고|라이선스|소프트웨어|\bSW\b|서버|노후장비|소모품|복합기|"
+                          r"보험|세무|회계|4대보험|급여|긴급의료|보안\s*지원|정보보호|디자인업무|아웃소싱|소액수의|"
+                          r"청소|경비|시설관리|임차|인쇄|홍보물|행사\s*대행|교육\s*위탁|채용")
 G2B_KINDS = [("Servc", "용역"), ("Thng", "물품"), ("Cnstwk", "공사")]
 G2B_MAX_DAYS = 28   # API 조회 기간 한도(약 한 달)
 
 
 def g2b(key, since, now):
-    """since(직전 보고 시각)부터 지금까지 등록된 공고. 몇 시간 겹쳐 조회하고 중복은 key로 거른다"""
+    """since부터 지금까지 등록된 공고 (since는 main이 직전 보고보다 10분 앞당겨 넘긴다)"""
     if not key:
         raise RuntimeError("G2B_API_KEY가 없습니다")
-    since = max(since - timedelta(hours=2), now - timedelta(days=G2B_MAX_DAYS))
+    since = max(since, now - timedelta(days=G2B_MAX_DAYS))
     begin, end = since.strftime("%Y%m%d%H%M"), now.strftime("%Y%m%d%H%M")
     out = []
     for op, kind in G2B_KINDS:
@@ -193,7 +199,10 @@ def g2b(key, since, now):
                 break
             page += 1
         for r in rows:
+            title = r["bidNtceNm"]
             if G2B_DEMAND not in (r.get("dminsttNm") or ""):
+                continue
+            if G2B_INTERNAL.search(title) or not (overseas.is_overseas(title) or G2B_KEEP.search(title)):
                 continue
             amt = r.get("asignBdgtAmt") or r.get("presmptPrce")
             info = []

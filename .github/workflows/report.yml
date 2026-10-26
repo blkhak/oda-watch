@@ -1,11 +1,16 @@
 name: oda-watch
 
 on:
-  # cron은 UTC 기준(KST-9). 정각엔 GitHub가 붐벼 10~20분씩 밀리므로 10분 일찍 걸어 둔다
+  # cron은 UTC 기준(KST-9). 예약 실행은 10~30분씩 늦게 시작하므로 40분 일찍 깨우고,
+  # main.py가 보고 시각(08:00·17:50) 1분 전까지 기다렸다가 수집·전송한다
   schedule:
-    - cron: "50 22 * * 0-4"   # 평일 KST 07:50 → 오전 보고
-    - cron: "50 6 * * 1-5"    # 평일 KST 15:50 → 오후 보고
-  workflow_dispatch:          # Actions 화면에서 수동 실행 (주말·공휴일에도 보냄)
+    - cron: "20 22 * * 0-4"   # 평일 KST 07:20 → 08:00 보고
+    - cron: "10 8 * * 1-5"    # 평일 KST 17:10 → 17:50 보고
+  workflow_dispatch:          # Actions 화면에서 수동 실행 (기다리지 않고 바로, 주말·공휴일에도 보냄)
+    inputs:
+      test_days:
+        description: "시험 보고: 최근 며칠 치를 모두 담을지 (0이면 평소처럼 새 글만, 시험 보고는 기록을 바꾸지 않음)"
+        default: "0"
 
 permissions:
   contents: write
@@ -17,7 +22,7 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,6 +38,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE: ${{ github.event_name == 'workflow_dispatch' }}
+          WAIT_FOR_SLOT: ${{ github.event_name == 'schedule' }}
+          TEST_DAYS: ${{ inputs.test_days }}
         run: python main.py
       - name: 보고서 보관
         if: always()
