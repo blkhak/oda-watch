@@ -3,7 +3,7 @@
 GitHub Actions가 평일 오전 8시·오후 4시(KST)에 실행한다. 주말·공휴일엔 건너뛰고,
 다음 보고에 그동안 올라온 글이 모두 들어간다 (이미 보낸 글은 state/seen.json에 기록).
 
-환경변수(GitHub Secrets): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, G2B_API_KEY
+환경변수(GitHub Secrets): TELEGRAM_BOT_TOKEN, G2B_API_KEY (TELEGRAM_CHAT_ID는 없으면 자동으로 찾음)
 FORCE=true 이면 주말·공휴일에도 실행 (수동 실행용)
 """
 import json
@@ -69,6 +69,23 @@ def update_seen(items, state, now, errors):
     return {"last_run": now.isoformat(timespec="minutes"), "seen": seen}
 
 
+CHAT_FILE = os.path.join(HERE, "state", "chat_id.txt")
+
+
+def find_chat(token):
+    """TELEGRAM_CHAT_ID Secret이 없으면 봇에게 최근 말을 건 대화방을 찾아 state/chat_id.txt에 기억한다"""
+    if os.path.exists(CHAT_FILE):
+        with open(CHAT_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    ids = telegram.chat_ids(token)
+    if len(ids) != 1:
+        sys.exit(f"대화방을 정할 수 없음(찾은 수 {len(ids)}): 봇에게 메시지를 한 번 보내고 다시 실행하세요")
+    os.makedirs(os.path.dirname(CHAT_FILE), exist_ok=True)
+    with open(CHAT_FILE, "w", encoding="utf-8") as f:
+        f.write(str(ids[0][0]))
+    return str(ids[0][0])
+
+
 def site_of(key):
     return {"EDCF": "EDCF", "수출입은행": "수출입은행", "KSP": "KSP", "G2B": "나라장터",
             "ICAK": "해외건설협회", "KENCA": "엔지니어링협회"}.get(key.split("|")[0], "")
@@ -98,7 +115,8 @@ def main():
     lines += [f"⚠ {s} 확인 실패: {e[:80]}" for s, e in errors.items()]
     print(title, *lines, sep="\n")
 
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID") or (find_chat(token) if token else None)
     if token and chat:
         telegram.send_file(token, chat, path, caption=title + "\n" + "\n".join(lines))
     else:
