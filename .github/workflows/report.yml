@@ -48,4 +48,7 @@ jobs:
           git config user.name "oda-watch-bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A state
-          git diff --cached --quiet || (git commit -m "state $(date -u +%FT%TZ)" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "state $(date -u +%FT%TZ)"
+          for i in 1 2 3; do git pull -q --rebase && git push && exit 0; sleep $((i * 10)); done   # GitHub 일시 오류 대비
+          exit 1
