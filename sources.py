@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import overseas
 
@@ -138,13 +138,13 @@ def icak():
     return out
 
 
-# ── 엔지니어링협회: 공지·소식은 ETIS 게시판 ──────────────────────────────────────
+# ── 엔지니어링협회: 공지·소식은 ETIS 게시판, 해외사업 관련 글만 (국가명·해외·ODA 등 — overseas.py) ──
 ETIS_BOARDS = [("TB150", "공지", 1, 1), ("TB160", "공고", 2, 1), ("TB180", "협회소식", 7, 1),
                ("TB115", "입법·행정예고", 3, 9), ("TB050", "임금실태·통계", 1, 3)]
 
 
 def kenca():
-    out = []
+    out, raw = [], 0
     for cat, name, left, top in ETIS_BOARDS:
         q = f"leftParam={left}&topParam={top}&boardId=TOTALBBS&categorygroup2={cat}"
         page = get(f"https://www.etis.or.kr/bbsList.do?{q}")
@@ -153,63 +153,70 @@ def kenca():
             m = re.search(r"goDetail\('(\d+)'\);\">(.*?)</a>", row, re.S)
             if not m:
                 continue
+            raw += 1
+            if not overseas.is_overseas(clean(m[2])):
+                continue
             out.append({"key": f"KENCA|{cat}|{m[1]}", "site": "엔지니어링협회", "board": name, "title": clean(m[2]),
                         "date": ymd(row), "url": f"https://www.etis.or.kr/bbsView.do?{q}&boardNo={m[1]}", "info": ""})
+    if not raw:
+        raise RuntimeError("게시글을 하나도 읽지 못했습니다 (홈페이지 구조 변경 가능성)")
     return out
 
 
-# ── 나라장터: 용역 입찰공고 중 해외 사업 ──────────────────────────────────────────
-# 해외 지명이 들어가도 개발협력 사업이 아닌 것 (국외 연수·체험학습·해외취업 등)
-NOISE = re.compile(r"연수|현장체험|체험학습|수학여행|해외취업|취업지원|봉사|탐방|벤치마킹|항공권|여행|관광객|유학생|"
-                   r"어학|한국어|교재|청사관리|시설관리|박람회|전시회|홍보관|행사\s*대행|축제|공연|문화원|"
-                   r"출장|상표|규격인증|인증획득|판로|바이어|시장개척|마케팅|수출\s*확대|만족도")
-ODA_AGENCIES = re.compile(r"한국국제협력단|한국수출입은행|해외인프라도시개발지원공사|KIND|한국개발연구원|대외경제정책연구원")
+# ── 나라장터: 수요기관이 한국수출입은행인 입찰공고 (용역·물품·공사) ──────────────────────
+G2B_DEMAND = "한국수출입은행"
+G2B_KINDS = [("Servc", "용역"), ("Thng", "물품"), ("Cnstwk", "공사")]
+G2B_MAX_DAYS = 28   # API 조회 기간 한도(약 한 달)
 
 
-def g2b(key, now):
-    """최근 26시간 동안 등록된 용역 공고 (실행이 몇 분 늦어도 빠지지 않게 겹쳐 조회하고, 중복은 key로 거른다)"""
+def g2b(key, since, now):
+    """since(직전 보고 시각)부터 지금까지 등록된 공고. 몇 시간 겹쳐 조회하고 중복은 key로 거른다"""
     if not key:
         raise RuntimeError("G2B_API_KEY가 없습니다")
-    begin, end = (now - timedelta(hours=26)).strftime("%Y%m%d%H%M"), now.strftime("%Y%m%d%H%M")
-    rows, page = [], 1
-    while True:
-        q = urllib.parse.urlencode({"serviceKey": key, "type": "json", "inqryDiv": 1, "inqryBgnDt": begin,
-                                    "inqryEndDt": end, "numOfRows": 999, "pageNo": page})
-        body = json.loads(get(f"https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc?{q}",
-                              timeout=120))["response"]["body"]
-        it = body.get("items") or []
-        it = it if isinstance(it, list) else it.get("item", [])
-        rows += it
-        if not it or len(rows) >= int(body.get("totalCount", 0)):
-            break
-        page += 1
+    since = max(since - timedelta(hours=2), now - timedelta(days=G2B_MAX_DAYS))
+    begin, end = since.strftime("%Y%m%d%H%M"), now.strftime("%Y%m%d%H%M")
     out = []
-    for r in rows:
-        title, org = r["bidNtceNm"], r.get("ntceInsttNm") or ""
-        if not (ODA_AGENCIES.search(org) or (overseas.is_overseas(title) and not NOISE.search(title))):
-            continue
-        amt = r.get("asignBdgtAmt") or r.get("presmptPrce")
-        info = [org]
-        if amt and str(amt).replace(".", "").isdigit() and float(amt) > 0:
-            info.append(f"{float(amt) / 1e8:,.1f}억원")
-        if r.get("bidClseDt"):
-            info.append(f"마감 {r['bidClseDt'][:16]}")
-        out.append({"key": f"G2B|{r['bidNtceNo']}|{r['bidNtceOrd']}", "site": "나라장터", "board": "용역 입찰공고(해외)",
-                    "title": title, "date": ymd(r.get("bidNtceDt")),
-                    "url": r.get("bidNtceDtlUrl") or "https://www.g2b.go.kr", "info": " · ".join(info)})
+    for op, kind in G2B_KINDS:
+        rows, page = [], 1
+        while True:
+            q = urllib.parse.urlencode({"serviceKey": key, "type": "json", "inqryDiv": 1, "inqryBgnDt": begin,
+                                        "inqryEndDt": end, "dminsttNm": G2B_DEMAND, "numOfRows": 999, "pageNo": page})
+            d = json.loads(get(f"https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfo{op}PPSSrch?{q}",
+                               timeout=120))
+            if "response" not in d:
+                raise RuntimeError(f"나라장터 API 오류: {json.dumps(d, ensure_ascii=False)[:150]}")
+            body = d["response"]["body"]
+            it = body.get("items") or []
+            it = it if isinstance(it, list) else it.get("item", [])
+            rows += it
+            if not it or len(rows) >= int(body.get("totalCount", 0)):
+                break
+            page += 1
+        for r in rows:
+            if G2B_DEMAND not in (r.get("dminsttNm") or ""):
+                continue
+            amt = r.get("asignBdgtAmt") or r.get("presmptPrce")
+            info = []
+            if amt and str(amt).replace(".", "").isdigit() and float(amt) > 0:
+                info.append(f"{float(amt) / 1e8:,.1f}억원")
+            if r.get("bidClseDt"):
+                info.append(f"마감 {r['bidClseDt'][:16]}")
+            out.append({"key": f"G2B|{r['bidNtceNo']}|{r['bidNtceOrd']}", "site": "나라장터", "board": f"{kind} 입찰공고",
+                        "title": r["bidNtceNm"], "date": ymd(r.get("bidNtceDt")),
+                        "url": r.get("bidNtceDtlUrl") or "https://www.g2b.go.kr", "info": " · ".join(info)})
     return out
 
 
-def collect_all(now=None):
+def collect_all(now, since):
     """(항목 목록, 실패한 사이트별 오류) — 한 사이트가 막혀도 나머지는 보고한다"""
-    now = now or datetime.now()
-    jobs = [("EDCF", edcf), ("수출입은행", exim), ("KSP", ksp), ("나라장터", lambda: g2b(os.environ.get("G2B_API_KEY"), now)),
+    jobs = [("EDCF", edcf), ("수출입은행", exim), ("KSP", ksp),
+            ("나라장터", lambda: g2b(os.environ.get("G2B_API_KEY"), since, now)),
             ("해외건설협회", icak), ("엔지니어링협회", kenca)]
     items, errors = [], {}
     for name, fn in jobs:
         try:
             got = fn()
-            if not got and name != "나라장터":   # 나라장터는 해외 공고가 없는 날도 있다
+            if not got and name not in ("나라장터", "엔지니어링협회"):   # 둘은 걸러서 0건인 날도 있다
                 raise RuntimeError("게시글을 하나도 읽지 못했습니다 (홈페이지 구조 변경 가능성)")
             items += got
         except Exception as e:  # noqa: BLE001 — 사이트 하나의 실패로 보고 전체가 멈추면 안 됨

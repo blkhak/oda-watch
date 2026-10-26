@@ -1,4 +1,4 @@
-"""6개 사이트 게시판의 새 글을 모아 한글 보고서(.hwpx)를 텔레그램으로 보낸다.
+"""6개 사이트 게시판의 새 글을 모아 PDF 보고서를 텔레그램으로 보낸다.
 
 GitHub Actions가 평일 오전 8시·오후 4시(KST)에 실행한다. 주말·공휴일엔 건너뛰고,
 다음 보고에 그동안 올라온 글이 모두 들어간다 (이미 보낸 글은 state/seen.json에 기록).
@@ -98,14 +98,14 @@ def main():
         print("주말·공휴일이라 건너뜀")
         return
     state = load_state()
-    items, errors = sources.collect_all(now)
+    since = datetime.fromisoformat(state["last_run"]) if state else now - timedelta(days=FIRST_RUN_DAYS)
+    items, errors = sources.collect_all(now, since)
     new = pick_new(items, state, now)
-    since = state["last_run"].replace("T", " ") if state else f"최근 {FIRST_RUN_DAYS}일"
-    period = f"{since} ~ {now:%Y-%m-%d %H:%M}"
+    period = f"{since:%Y-%m-%d %H:%M} ~ {now:%Y-%m-%d %H:%M}"
     slot = "오전" if now.hour < 12 else "오후"
     title = f"ODA·해외사업 게시판 보고 ({now:%Y-%m-%d} {slot})"
     os.makedirs(os.path.join(HERE, "out"), exist_ok=True)
-    path = os.path.join(HERE, "out", f"게시판보고_{now:%Y%m%d_%H%M}.hwpx")
+    path = os.path.join(HERE, "out", f"게시판보고_{now:%Y%m%d_%H%M}.pdf")
     report.build(path, title, period, new, errors,
                  note=f"첫 보고라 최근 {FIRST_RUN_DAYS}일 안의 글만 담았습니다." if state is None else "")
 

@@ -1,67 +1,85 @@
-"""새 게시글 목록을 한글 문서(.hwpx)로 만든다."""
+"""새 게시글 목록을 PDF 보고서로 만든다. 한글 글꼴: GitHub(우분투)는 나눔고딕(fonts-nanum), 윈도우는 맑은 고딕."""
+import os
 from collections import OrderedDict
+from xml.sax.saxutils import escape
 
-from hwpx import HwpxDocument
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 SITE_ORDER = ["EDCF", "수출입은행", "KSP", "나라장터", "해외건설협회", "엔지니어링협회"]
-HEAD_FILL = "#DCE6F2"
+FONTS = [("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
+         ("C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/malgunbd.ttf")]
+HEAD_FILL = colors.HexColor("#DCE6F2")
+LINK = colors.HexColor("#1F4E99")
+
+
+def _fonts():
+    for regular, bold in FONTS:
+        if os.path.exists(regular) and os.path.exists(bold):
+            pdfmetrics.registerFont(TTFont("KR", regular))
+            pdfmetrics.registerFont(TTFont("KR-B", bold))
+            return
+    raise RuntimeError("한글 글꼴을 찾지 못했습니다 (우분투: sudo apt-get install fonts-nanum)")
+
+
+def _styles():
+    s = lambda name, **kw: ParagraphStyle(name, **{"fontName": "KR", "fontSize": 8.5, "leading": 11,
+                                                   "wordWrap": "CJK", **kw})
+    return {"title": s("title", fontSize=15, leading=20, fontName="KR-B"),
+            "small": s("small", fontSize=8, textColor=colors.HexColor("#555555")),
+            "h": s("h", fontSize=11, leading=15, fontName="KR-B", spaceBefore=6, spaceAfter=3),
+            "cell": s("cell"), "head": s("head", fontName="KR-B"), "body": s("body", fontSize=9.5, leading=13)}
+
+
+def _table(rows, widths, st):
+    t = Table(rows, colWidths=widths, repeatRows=1)
+    t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9AA5B1")),
+                           ("BACKGROUND", (0, 0), (-1, 0), HEAD_FILL),
+                           ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                           ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5)]))
+    return t
 
 
 def build(path, title, period, items, errors, note=""):
-    doc = HwpxDocument.new()
-    doc.set_page_margins(left=4252, right=4252, top=4252, bottom=4252)   # 약 15mm (1mm ≈ 283.5)
-    bold = doc.ensure_run_style(bold=True)
-    big = doc.ensure_run_style(bold=True, size=16)
-    small = doc.ensure_run_style(size=9, color="#555555")
-
-    doc.add_paragraph(title, char_pr_id_ref=big)
-    doc.add_paragraph(f"대상 기간: {period}", char_pr_id_ref=small)
-    doc.add_paragraph("")
-
+    _fonts()
+    st = _styles()
+    P = lambda text, style="cell": Paragraph(text, st[style])
     by_site = OrderedDict((s, []) for s in SITE_ORDER)
     for it in items:
         by_site.setdefault(it["site"], []).append(it)
 
-    # 요약표: 사이트별 새 글 수
-    doc.add_paragraph("■ 요약", char_pr_id_ref=bold)
-    summary = doc.add_table(len(by_site) + 1, 3)
-    summary.set_column_widths([3, 2, 7])
-    for c, h in enumerate(("사이트", "새 글", "게시판별")):
-        summary.set_cell_text(0, c, h)
-        summary.set_cell_shading(0, c, HEAD_FILL)
-    for r, (site, its) in enumerate(by_site.items(), 1):
+    story = [P(escape(title), "title"), P(escape(f"대상 기간: {period}"), "small"), Spacer(1, 4 * mm),
+             P("■ 요약", "h")]
+    rows = [[P("사이트", "head"), P("새 글", "head"), P("게시판별", "head")]]
+    for site, its in by_site.items():
         boards = OrderedDict()
         for it in its:
             boards[it["board"]] = boards.get(it["board"], 0) + 1
         detail = "접속 실패" if site in errors else (", ".join(f"{b} {n}" for b, n in boards.items()) or "-")
-        summary.set_cell_text(r, 0, site)
-        summary.set_cell_text(r, 1, f"{len(its)}건")
-        summary.set_cell_text(r, 2, detail)
-    doc.add_paragraph("")
+        rows.append([P(site), P(f"{len(its)}건"), P(escape(detail))])
+    story.append(_table(rows, [35 * mm, 18 * mm, 127 * mm], st))
 
     for site, its in by_site.items():
         if not its:
             continue
-        doc.add_paragraph(f"■ {site} ({len(its)}건)", char_pr_id_ref=bold)
-        t = doc.add_table(len(its) + 1, 4)
-        t.set_column_widths([2.2, 7, 1.8, 3.5])
-        for c, h in enumerate(("게시판", "제목", "등록일", "비고")):
-            t.set_cell_text(0, c, h)
-            t.set_cell_shading(0, c, HEAD_FILL)
-        for r, it in enumerate(sorted(its, key=lambda x: (x["board"], x["date"])), 1):
-            t.set_cell_text(r, 0, it["board"])
-            cell = t.cell(r, 1)
-            doc.add_hyperlink(it["url"], it["title"], paragraph=cell.paragraphs[0])
-            t.set_cell_text(r, 2, it["date"][5:].replace("-", ".") if it["date"] else "")
-            t.set_cell_text(r, 3, it["info"])
-        doc.add_paragraph("")
+        story.append(P(escape(f"■ {site} ({len(its)}건)"), "h"))
+        rows = [[P("게시판", "head"), P("제목", "head"), P("등록일", "head"), P("비고", "head")]]
+        for it in sorted(its, key=lambda x: (x["board"], x["date"])):
+            link = f'<link href="{escape(it["url"], {chr(34): "&quot;"})}" color="#{LINK.hexval()[2:]}">{escape(it["title"])}</link>'
+            rows.append([P(escape(it["board"])), P(link), P(it["date"][5:].replace("-", ".") if it["date"] else ""),
+                         P(escape(it["info"]))])
+        story.append(_table(rows, [26 * mm, 92 * mm, 14 * mm, 48 * mm], st))
 
     if errors:
-        doc.add_paragraph("■ 확인하지 못한 사이트", char_pr_id_ref=bold)
-        for site, err in errors.items():
-            doc.add_paragraph(f"- {site}: {err}")
-        doc.add_paragraph("")
+        story.append(P("■ 확인하지 못한 사이트", "h"))
+        story += [P(escape(f"- {site}: {err}"), "body") for site, err in errors.items()]
 
-    doc.add_paragraph("제목을 누르면 원문으로 이동합니다." + (f" {note}" if note else ""), char_pr_id_ref=small)
-    doc.save_to_path(path)
+    story += [Spacer(1, 4 * mm), P(escape("제목을 누르면 원문으로 이동합니다." + (f" {note}" if note else "")), "small")]
+    SimpleDocTemplate(path, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm,
+                      bottomMargin=15 * mm, title=title).build(story)
     return path
