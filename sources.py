@@ -38,13 +38,13 @@ def ca_bundle(url):
     return ["--cacert", path]
 
 
-def get(url, timeout=60, retries=3):
+def get(url, timeout=60, retries=5):
     for attempt in range(retries):
         r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
                            capture_output=True)
         if r.returncode == 0 and r.stdout:
             return r.stdout.decode("utf-8", "replace")
-        time.sleep(5 * (attempt + 1))
+        time.sleep(10 * (attempt + 1))   # 수출입은행 서버가 가끔 연결을 끊는다
     raise RuntimeError(f"접속 실패(curl {r.returncode}): {url.split('?')[0]}")
 
 
