@@ -1,9 +1,0 @@
-name: debug-exim
-on: workflow_dispatch
-jobs:
-  d:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          curl -sv -o /dev/null --max-time 30 https://www.koreaexim.go.kr/HPHKBI039M01 2>&1 | grep -E "Connected|subject:|issuer:|SSL certificate|expire|Location|HTTP/" | head -20
-          echo | openssl s_client -connect www.koreaexim.go.kr:443 -servername www.koreaexim.go.kr -showcerts 2>/dev/null | grep -E "^ *[0-9] s:|i:|Verify return" | head

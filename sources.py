@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 import urllib.parse
 from datetime import datetime, timedelta
@@ -17,9 +18,30 @@ import overseas
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
 
+SYSTEM_CA = "/etc/ssl/certs/ca-certificates.crt"
+# 수출입은행 서버는 해외 접속 때 중간 인증서를 빼고 보내 리눅스 curl이 검증하지 못한다.
+# 공식 배포본(cacerts.thawte.com, 2027-11 만료)을 시스템 인증서 묶음에 더해 쓴다 — 검증을 끄는 게 아님.
+EXTRA_CA = {"www.koreaexim.go.kr": os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs",
+                                                "thawte-tls-rsa-ca-g1.pem")}
+
+
+def ca_bundle(url):
+    host = urllib.parse.urlsplit(url).hostname
+    if host not in EXTRA_CA or not os.path.exists(SYSTEM_CA):   # 윈도우 curl은 시스템 인증서 저장소가 알아서 채운다
+        return []
+    path = os.path.join(tempfile.gettempdir(), f"ca-{host}.pem")
+    if not os.path.exists(path):
+        with open(path, "wb") as out:
+            for src in (SYSTEM_CA, EXTRA_CA[host]):
+                with open(src, "rb") as f:
+                    out.write(f.read() + b"\n")
+    return ["--cacert", path]
+
+
 def get(url, timeout=60, retries=3):
     for attempt in range(retries):
-        r = subprocess.run(["curl", "-s", "-L", "--max-time", str(timeout), "-A", UA, url], capture_output=True)
+        r = subprocess.run(["curl", "-s", "-L", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
+                           capture_output=True)
         if r.returncode == 0 and r.stdout:
             return r.stdout.decode("utf-8", "replace")
         time.sleep(5 * (attempt + 1))
