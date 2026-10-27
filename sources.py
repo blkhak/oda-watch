@@ -99,7 +99,13 @@ def edcf():
     bids = {}
     for kind in EDCF_BID_KINDS:
         path = "/fe/HPHFFE065M01" + (f"?{urllib.parse.urlencode({'boardtext8': kind})}" if kind else "")
-        for it in humanframe("EDCF", "입찰공고", EDCF, path, "사업명", extra=("분류", "사업분야", "국가")):
+        try:
+            got = humanframe("EDCF", "입찰공고", EDCF, path, "사업명", extra=("분류", "사업분야", "국가"))
+        except RuntimeError:
+            if not kind:        # 전체 목록은 꼭 읽어야 하고, 분류별 목록은 보충용이라 실패해도 넘어간다
+                raise
+            continue
+        for it in got:
             bids.setdefault(it["key"], it)
     return (list(bids.values())
             + humanframe("EDCF", "입찰예정사업", EDCF, "/fe/HPHFFE054M01", "국가", "goDetail", extra=("승인년도",))
