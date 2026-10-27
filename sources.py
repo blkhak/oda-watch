@@ -121,8 +121,19 @@ def ksp():
 # ── 해외건설협회: JSON API ──────────────────────────────────────────────────────
 ICAK_BOARDS = [  # (bbsId, 게시판 이름, 목록 주소)
     (705, "입찰공고", "bidPblancList"), (12, "공지사항", "noticeList"), (11, "보도자료", "pressList"),
-    (701, "국토교통 ODA", None), (700, "최신정보", "analysisList"), (141, "건설뉴스", "buildingNewsList"),
+    (701, "국토교통 ODA", "edcfList"), (700, "최신정보", "analysisList"), (141, "건설뉴스", "buildingNewsList"),
 ]
+
+
+ICAK_ODA_FIELDS = ["발주처", "EDCF 지원", "컨설팅비", "사업기간"]   # 국토교통 ODA 본문 표에서 비고에 옮길 항목
+
+
+def icak_oda_info(cn):
+    """국토교통 ODA 글은 상세 화면이 회원 로그인 전용이라, 목록 API 본문(cnTxt)의 표에서 핵심 항목을 뽑아 비고에 담는다"""
+    text = lambda s: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<(br|/p|/div)[^>]*>", " ", s)))).strip()
+    rows = {text(k): text(v).split("*")[0].strip() for k, v in
+            re.findall(r"<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>", cn or "", re.S)}
+    return " / ".join(f"{k}: {rows[k]}" for k in ICAK_ODA_FIELDS if rows.get(k) and rows[k] != "-")
 
 
 def icak():
@@ -130,11 +141,15 @@ def icak():
     for bbs, name, page in ICAK_BOARDS:
         q = urllib.parse.urlencode({"pageIndex": 1, "bbsId": bbs, "limit": 20})
         for p in json.loads(get(f"https://www.icak.or.kr/board/api/bbsList?{q}"))["data"]["list"]:
-            view = page.replace("List", "View") if page and page != "buildingNewsList" else None
-            url = (f"https://www.icak.or.kr/board/{view}?sn={p['sn']}&bbsId={bbs}" if view
-                   else f"https://www.icak.or.kr/board/{page or 'bidPblancList'}")
+            info = ""
+            if page in ("buildingNewsList", "edcfList"):   # 상세 화면을 바로 열 수 없어 목록으로 연결
+                url = f"https://www.icak.or.kr/board/{page}"
+            else:
+                url = f"https://www.icak.or.kr/board/{page.replace('List', 'View')}?sn={p['sn']}&bbsId={bbs}"
+            if page == "edcfList":
+                info = icak_oda_info(p.get("cnTxt")) + " (상세는 해건협 로그인 필요)"
             out.append({"key": f"ICAK|{bbs}|{p['sn']}", "site": "해외건설협회", "board": name,
-                        "title": p["titl"].strip(), "date": ymd(p.get("regDt")), "url": url, "info": ""})
+                        "title": p["titl"].strip(), "date": ymd(p.get("regDt")), "url": url, "info": info})
     return out
 
 
