@@ -28,6 +28,19 @@ FORGET_DAYS = 90        # 이 기간 동안 목록에서 안 보인 글은 기�
 SEND_TIMES = [(8, 0), (17, 50)]   # 보고 시각 (KST)
 OVERLAP = timedelta(minutes=10)   # 직전 보고와 겹쳐 조회하는 시간
 NOTHING_NEW = "해외사업 관련 추가 게시글 없습니다♥"
+SITE_URLS = {"EDCF": "https://www.edcfkorea.go.kr/fe/HPHFFE065M01",
+             "수출입은행": "https://www.koreaexim.go.kr/HPHKBI037M01",
+             "KSP": "https://www.ksp.go.kr",
+             "나라장터": "https://www.g2b.go.kr",
+             "해외건설협회": "https://www.icak.or.kr/board/noticeList",
+             "엔지니어링협회": "https://www.etis.or.kr/bbsList.do?leftParam=1&topParam=1&boardId=TOTALBBS&categorygroup2=TB150"}
+
+
+def nothing_new(errors):
+    """새 글 0건일 때 보낼 문구. 끝내 접속하지 못한 사이트가 있으면 직접 확인하라고 알린다"""
+    if not errors:
+        return NOTHING_NEW
+    return f"해외사업 관련 추가 게시글 없으나, {'·'.join(errors)}의 경우 접속이 되지 않아 직접 확인하셔야 합니다"
 
 
 def load_state():
@@ -157,10 +170,10 @@ def main():
     if token and chat and path:
         telegram.send_file(token, chat, path, caption=title + "\n" + "\n".join(lines))
     elif token and chat:
-        telegram.send(token, chat, NOTHING_NEW,   # 확인 실패한 사이트는 함께 알린다
-                      "\n".join(lines[1:] + (["(시험 발송)"] if empty_test else [])))
+        telegram.send(token, chat, nothing_new(errors), "(시험 발송)" if empty_test else "",
+                      links=[(f"{s} 열기", SITE_URLS[s]) for s in errors if s in SITE_URLS])
     else:
-        print("텔레그램 설정이 없어 보내지 않음:", path or NOTHING_NEW)
+        print("텔레그램 설정이 없어 보내지 않음:", path or nothing_new(errors))
         if os.environ.get("GITHUB_ACTIONS"):
             sys.exit("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID Secret을 등록하세요")
     if not test_days and not empty_test:
