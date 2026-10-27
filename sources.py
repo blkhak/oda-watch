@@ -38,13 +38,14 @@ def ca_bundle(url):
     return ["--cacert", path]
 
 
-def get(url, timeout=60, retries=5):
+def get(url, timeout=30, retries=5):
     for attempt in range(retries):
         r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
                            capture_output=True)
         if r.returncode == 0 and r.stdout:
             return r.stdout.decode("utf-8", "replace")
-        time.sleep(10 * (attempt + 1))   # 수출입은행 서버가 가끔 연결을 끊는다
+        if attempt < retries - 1:
+            time.sleep(15 * 2 ** attempt)   # 해외(GitHub) 접속을 서버가 가끔 끊는다: 15·30·60·120초 쉬고 다시
     raise RuntimeError(f"접속 실패(curl {r.returncode}): {url.split('?')[0]}")
 
 
@@ -245,18 +246,29 @@ def g2b(key, since, now):
     return out
 
 
+SITE_RETRY_WAITS = [180, 600]   # 사이트 접속이 끝내 실패하면 3분, 10분 쉬었다가 그 사이트만 다시 읽는다
+
+
 def collect_all(now, since):
     """(항목 목록, 실패한 사이트별 오류) — 한 사이트가 막혀도 나머지는 보고한다"""
     jobs = [("EDCF", edcf), ("수출입은행", exim), ("KSP", ksp),
             ("나라장터", lambda: g2b(os.environ.get("G2B_API_KEY"), since, now)),
             ("해외건설협회", icak), ("엔지니어링협회", kenca)]
     items, errors = [], {}
-    for name, fn in jobs:
-        try:
-            got = fn()
-            if not got and name not in ("나라장터", "엔지니어링협회"):   # 둘은 걸러서 0건인 날도 있다
-                raise RuntimeError("게시글을 하나도 읽지 못했습니다 (홈페이지 구조 변경 가능성)")
-            items += got
-        except Exception as e:  # noqa: BLE001 — 사이트 하나의 실패로 보고 전체가 멈추면 안 됨
-            errors[name] = str(e)[:200]
+    for wait in [0] + SITE_RETRY_WAITS:
+        if wait:
+            print(f"{', '.join(errors)} 접속 실패 → {wait // 60}분 뒤 다시 시도")
+            time.sleep(wait)
+        todo = [(n, fn) for n, fn in jobs if n in errors] if wait else jobs   # 실패한 사이트만 다시
+        errors = {}
+        for name, fn in todo:
+            try:
+                got = fn()
+                if not got and name not in ("나라장터", "엔지니어링협회"):   # 둘은 걸러서 0건인 날도 있다
+                    raise RuntimeError("게시글을 하나도 읽지 못했습니다 (홈페이지 구조 변경 가능성)")
+                items += got
+            except Exception as e:  # noqa: BLE001 — 사이트 하나의 실패로 보고 전체가 멈추면 안 됨
+                errors[name] = str(e)[:200]
+        if not errors:
+            break
     return items, errors
