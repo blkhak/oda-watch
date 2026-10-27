@@ -146,6 +146,9 @@ def main():
     for it in new:
         counts[it["site"]] = counts.get(it["site"], 0) + 1
     lines = [f"새 글 {len(new)}건" + (" — " + ", ".join(f"{s} {n}" for s, n in counts.items()) if counts else "")]
+    picks = [it for it in new if report.is_opportunity(it)]
+    if picks:
+        lines += [f"★ 사업참여 기회 {len(picks)}건"] + [f"· {it['title'][:60]}" for it in picks[:5]]
     lines += [f"⚠ {s} 확인 실패: {e[:80]}" for s, e in errors.items()]
     print(title, *lines, sep="\n")
 

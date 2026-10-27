@@ -92,8 +92,16 @@ EDCF = "https://www.edcfkorea.go.kr"
 EXIM = "https://www.koreaexim.go.kr"
 
 
+EDCF_BID_KINDS = ["", "개도국발주사업", "EDCF발주사업"]   # 첫 쪽이 10건뿐이라 분류별로도 읽어 밀려난 공고가 없게 한다
+
+
 def edcf():
-    return (humanframe("EDCF", "입찰공고", EDCF, "/fe/HPHFFE065M01", "사업명", extra=("분류", "사업분야", "국가"))
+    bids = {}
+    for kind in EDCF_BID_KINDS:
+        path = "/fe/HPHFFE065M01" + (f"?{urllib.parse.urlencode({'boardtext8': kind})}" if kind else "")
+        for it in humanframe("EDCF", "입찰공고", EDCF, path, "사업명", extra=("분류", "사업분야", "국가")):
+            bids.setdefault(it["key"], it)
+    return (list(bids.values())
             + humanframe("EDCF", "입찰예정사업", EDCF, "/fe/HPHFFE054M01", "국가", "goDetail", extra=("승인년도",))
             + humanframe("EDCF", "입찰결과", EDCF, "/fe/HPHFFE069M01", "사업명", "result",
                          extra=("분류", "국가", "수주업체", "수주기업"))
