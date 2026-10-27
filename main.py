@@ -27,6 +27,7 @@ STALE_DAYS = 30         # 처음 보는 글이라도 이보다 오래된 글은 
 FORGET_DAYS = 90        # 이 기간 동안 목록에서 안 보인 글은 기록에서 지운다
 SEND_TIMES = [(8, 0), (17, 50)]   # 보고 시각 (KST)
 OVERLAP = timedelta(minutes=10)   # 직전 보고와 겹쳐 조회하는 시간
+NOTHING_NEW = "해외사업 관련 추가 게시글 없습니다♥"
 
 
 def load_state():
@@ -133,10 +134,12 @@ def main():
     period = f"{since:%Y-%m-%d %H:%M} ~ {now:%Y-%m-%d %H:%M}"
     slot = f"시험 · 최근 {test_days}일" if test_days else ("오전" if now.hour < 12 else "오후")
     title = f"ODA·해외사업 게시판 보고 ({now:%Y-%m-%d} {slot})"
-    os.makedirs(os.path.join(HERE, "out"), exist_ok=True)
-    path = os.path.join(HERE, "out", f"게시판보고_{now:%Y%m%d_%H%M}.pdf")
-    report.build(path, title, period, new, errors,
-                 note=f"첫 보고라 최근 {FIRST_RUN_DAYS}일 안의 글만 담았습니다." if state is None else "")
+    path = None
+    if new:     # 새 글이 하나도 없으면 보고서 없이 문구만 보낸다
+        os.makedirs(os.path.join(HERE, "out"), exist_ok=True)
+        path = os.path.join(HERE, "out", f"게시판보고_{now:%Y%m%d_%H%M}.pdf")
+        report.build(path, title, period, new, errors,
+                     note=f"첫 보고라 최근 {FIRST_RUN_DAYS}일 안의 글만 담았습니다." if state is None else "")
 
     counts = {}
     for it in new:
@@ -147,10 +150,12 @@ def main():
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID") or (find_chat(token) if token else None)
-    if token and chat:
+    if token and chat and path:
         telegram.send_file(token, chat, path, caption=title + "\n" + "\n".join(lines))
+    elif token and chat:
+        telegram.send(token, chat, NOTHING_NEW, "\n".join(lines[1:]))   # 확인 실패한 사이트는 함께 알린다
     else:
-        print("텔레그램 설정이 없어 보내지 않음:", path)
+        print("텔레그램 설정이 없어 보내지 않음:", path or NOTHING_NEW)
         if os.environ.get("GITHUB_ACTIONS"):
             sys.exit("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID Secret을 등록하세요")
     if not test_days:
