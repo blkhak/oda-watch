@@ -44,7 +44,7 @@ def _styles():
 def is_opportunity(it):
     if "결과" in it["board"]:      # 입찰결과는 이미 끝난 사업
         return False
-    return it["board"] in ("입찰공고", "국토교통 ODA") or bool(OPPORTUNITY.search(it["title"]))
+    return "입찰공고" in it["board"] or it["board"] == "국토교통 ODA" or bool(OPPORTUNITY.search(it["title"]))
 
 
 def _link(it):
