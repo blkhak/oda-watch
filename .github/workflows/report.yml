@@ -11,6 +11,10 @@ on:
       test_days:
         description: "시험 보고: 최근 며칠 치를 모두 담을지 (0이면 평소처럼 새 글만, 시험 보고는 기록을 바꾸지 않음)"
         default: "0"
+      empty_test:
+        description: "새 글 0건 문구만 시험 발송 (수집·기록 안 함)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -40,6 +44,7 @@ jobs:
           FORCE: ${{ github.event_name == 'workflow_dispatch' }}
           WAIT_FOR_SLOT: ${{ github.event_name == 'schedule' }}
           TEST_DAYS: ${{ inputs.test_days }}
+          EMPTY_TEST: ${{ inputs.empty_test }}
         run: python main.py
       - name: 보고서 보관
         if: always()

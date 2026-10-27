@@ -126,7 +126,8 @@ def main():
         since = datetime.fromisoformat(state["last_run"]) - OVERLAP
     else:
         since = now - timedelta(days=FIRST_RUN_DAYS)
-    items, errors = sources.collect_all(now, since)
+    empty_test = os.environ.get("EMPTY_TEST", "").lower() == "true"   # 새 글 0건 문구 시험 (수집·기록 안 함)
+    items, errors = ([], {}) if empty_test else sources.collect_all(now, since)
     if test_days:
         new = [it for it in items if it["date"] and it["date"] >= since.date().isoformat()]
     else:
@@ -153,12 +154,13 @@ def main():
     if token and chat and path:
         telegram.send_file(token, chat, path, caption=title + "\n" + "\n".join(lines))
     elif token and chat:
-        telegram.send(token, chat, NOTHING_NEW, "\n".join(lines[1:]))   # 확인 실패한 사이트는 함께 알린다
+        telegram.send(token, chat, NOTHING_NEW,   # 확인 실패한 사이트는 함께 알린다
+                      "\n".join(lines[1:] + (["(시험 발송)"] if empty_test else [])))
     else:
         print("텔레그램 설정이 없어 보내지 않음:", path or NOTHING_NEW)
         if os.environ.get("GITHUB_ACTIONS"):
             sys.exit("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID Secret을 등록하세요")
-    if not test_days:
+    if not test_days and not empty_test:
         save_state(update_seen(items, state, now, errors))
 
 
