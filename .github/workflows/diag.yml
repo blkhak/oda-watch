@@ -1,0 +1,41 @@
+name: 접속 진단 (임시)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 실행 서버 위치
+        run: curl -s https://ipinfo.io/json | grep -E '"(ip|city|region|country|org)"'
+      - name: 이름 풀이
+        run: getent hosts www.edcfkorea.go.kr www.koreaexim.go.kr www.ksp.go.kr www.g2b.go.kr www.icak.or.kr || true
+      - name: TCP 연결 (443, 80)
+        run: |
+          for h in www.edcfkorea.go.kr www.koreaexim.go.kr; do
+            for p in 443 80; do
+              timeout 10 bash -c "</dev/tcp/$h/$p" && echo "$h:$p 연결됨" || echo "$h:$p 연결 실패"
+            done
+          done
+      - name: TLS 핸드셰이크
+        run: |
+          for h in www.edcfkorea.go.kr www.koreaexim.go.kr; do
+            echo "== $h"
+            timeout 20 openssl s_client -connect $h:443 -servername $h </dev/null 2>&1 | grep -E "Protocol|Cipher is|Verify return|errno|error|write:|read:" | head -5
+          done
+      - name: HTTP 요청 5회씩 (사이트별)
+        run: |
+          for u in https://www.edcfkorea.go.kr/fe/HPHFFE065M01 https://www.koreaexim.go.kr/HPHKBI039M01 http://www.edcfkorea.go.kr/ https://www.ksp.go.kr https://www.icak.or.kr/board/noticeList; do
+            for i in 1 2 3 4 5; do
+              curl -s -o /dev/null -A "Mozilla/5.0" --max-time 20 -w "$u #$i → 코드=%{http_code} 연결=%{time_connect}s TLS=%{time_appconnect}s 받은바이트=%{size_download} 종료=%{exitcode}\n" "$u" || true
+              sleep 3
+            done
+          done
+      - name: 실패 상세 (curl -v)
+        run: curl -v -o /dev/null -A "Mozilla/5.0" --max-time 20 https://www.edcfkorea.go.kr/fe/HPHFFE065M01 2>&1 | grep -vE "^\{|^\}" | head -40 || true
+      - name: 경로 추적 (TCP 443)
+        run: |
+          sudo apt-get install -y -qq traceroute > /dev/null 2>&1
+          sudo traceroute -T -p 443 -m 25 -q 1 -w 2 www.edcfkorea.go.kr || true
