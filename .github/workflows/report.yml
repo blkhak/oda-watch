@@ -1,11 +1,11 @@
 name: oda-watch
 
 on:
-  # cron은 UTC 기준(KST-9). 예약 실행은 10~30분씩 늦게 시작하므로 40분 일찍 깨우고,
-  # main.py가 보고 시각(08:00·17:50) 1분 전까지 기다렸다가 수집·전송한다
+  # cron은 UTC 기준(KST-9). 예약 실행은 30~45분씩 늦게 시작하기도 하므로 80분 일찍 깨우고,
+  # main.py가 보고 시각(08:00·17:50) 12분 전까지 기다렸다가 수집, 보고 시각에 전송한다
   schedule:
-    - cron: "20 22 * * 0-4"   # 평일 KST 07:20 → 08:00 보고
-    - cron: "10 8 * * 1-5"    # 평일 KST 17:10 → 17:50 보고
+    - cron: "40 21 * * 0-4"   # 평일 KST 06:40 → 08:00 보고
+    - cron: "30 7 * * 1-5"    # 평일 KST 16:30 → 17:50 보고
   workflow_dispatch:          # Actions 화면에서 수동 실행 (기다리지 않고 바로, 주말·공휴일에도 보냄)
     inputs:
       test_days:
@@ -26,7 +26,7 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 120   # 보고 시각까지 최대 40분 대기 + 접속 실패 시 재시도
+    timeout-minutes: 120   # 보고 시각 12분 전까지 최대 70분 대기 + 수집·전송
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

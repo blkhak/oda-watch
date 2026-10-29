@@ -38,14 +38,23 @@ def ca_bundle(url):
     return ["--cacert", path]
 
 
+DEADLINE = None   # 이 시각(time.time())이 지나면 재시도를 멈춘다 — 보고가 늦지 않게 main.py가 정함
+
+
+def left():
+    return float("inf") if DEADLINE is None else DEADLINE - time.time()
+
+
 def get(url, timeout=30, retries=5):
     for attempt in range(retries):
-        r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(timeout), "-A", UA, *ca_bundle(url), url],
-                           capture_output=True)
+        r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(max(5, int(min(timeout, left())))),
+                            "-A", UA, *ca_bundle(url), url], capture_output=True)
         if r.returncode == 0 and r.stdout:
             return r.stdout.decode("utf-8", "replace")
-        if attempt < retries - 1:
-            time.sleep(15 * 2 ** attempt)   # 해외(GitHub) 접속을 서버가 가끔 끊는다: 15·30·60·120초 쉬고 다시
+        pause = 15 * 2 ** attempt   # 해외(GitHub) 접속을 서버가 가끔 끊는다: 15·30·60·120초 쉬고 다시
+        if attempt == retries - 1 or pause + 5 > left():
+            break
+        time.sleep(pause)
     raise RuntimeError(f"접속 실패(curl {r.returncode}): {url.split('?')[0]}")
 
 
@@ -256,6 +265,9 @@ def collect_all(now, since):
             ("해외건설협회", icak), ("엔지니어링협회", kenca)]
     items, errors = [], {}
     for wait in [0] + SITE_RETRY_WAITS:
+        if wait and wait + 60 > left():
+            print(f"{', '.join(errors)} 접속 실패 → 보고 시각이 가까워 더 기다리지 않음")
+            break
         if wait:
             print(f"{', '.join(errors)} 접속 실패 → {wait // 60}분 뒤 다시 시도")
             time.sleep(wait)

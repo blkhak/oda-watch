@@ -1,7 +1,8 @@
 """6개 사이트 게시판의 새 글을 모아 PDF 보고서를 텔레그램으로 보낸다.
 
-평일 오전 8:00·오후 5:50(KST)에 보낸다. GitHub 예약 실행은 10~30분씩 늦게 시작하므로 40분 일찍 깨워
-보낼 시각까지 기다렸다가 수집한다(WAIT_FOR_SLOT=true). 주말·공휴일엔 건너뛰고 다음 보고에 몰아 담는다.
+평일 오전 8:00·오후 5:50(KST)에 보낸다. GitHub 예약 실행은 30~45분씩 늦게 시작하기도 하므로 80분 일찍 깨워
+보낼 시각 12분 전까지 기다렸다가 수집하고(WAIT_FOR_SLOT=true), 보낼 시각 1분 전까지 접속이 안 되는 사이트는
+더 기다리지 않고 '직접 확인하세요'로 표시해 제시간에 보낸다. 주말·공휴일엔 건너뛰고 다음 보고에 몰아 담는다.
 조회는 직전 보고 10분 전부터 겹쳐 하고, 이미 보낸 글(state/seen.json)은 뺀다.
 
 환경변수(GitHub Secrets): TELEGRAM_BOT_TOKEN, G2B_API_KEY (TELEGRAM_CHAT_ID는 없으면 자동으로 찾음)
@@ -27,6 +28,8 @@ STALE_DAYS = 30         # 처음 보는 글이라도 이보다 오래된 글은 
 FORGET_DAYS = 90        # 이 기간 동안 목록에서 안 보인 글은 기록에서 지운다
 SEND_TIMES = [(8, 0), (17, 50)]   # 보고 시각 (KST)
 OVERLAP = timedelta(minutes=10)   # 직전 보고와 겹쳐 조회하는 시간
+COLLECT_LEAD = timedelta(minutes=12)   # 보낼 시각보다 이만큼 먼저 수집을 시작 (접속 재시도 여유)
+LATE_BUDGET = timedelta(minutes=5)     # 보낼 시각을 이미 넘겨 시작했거나 수동 실행이면 수집에 쓰는 최대 시간
 NOTHING_NEW = "해외사업 관련 추가 게시글 없습니다♥"
 SITE_URLS = {"EDCF": "https://www.edcfkorea.go.kr/fe/HPHFFE065M01",
              "수출입은행": "https://www.koreaexim.go.kr/HPHKBI037M01",
@@ -112,15 +115,32 @@ def site_of(key):
 
 
 def wait_for_slot():
-    """1시간 안에 보낼 시각이 있으면 그 시각 1분 전까지 기다린다 (수집에 1분쯤 걸림)"""
+    """가까운 보낼 시각(앞으로 100분 안, 또는 30분 안쪽으로 이미 지난 시각)을 찾아 수집 시작 시각까지 기다린다.
+    보낼 시각을 돌려준다 (없으면 None)"""
     now = datetime.now()
     for h, m in SEND_TIMES:
         target = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        wait = (target - now).total_seconds() - 60
-        if 0 < wait <= 3600:
-            print(f"{target:%H:%M} 보고까지 {wait / 60:.0f}분 대기")
-            time.sleep(wait)
-            return
+        until = (target - now).total_seconds()
+        if -1800 < until <= 6000:
+            wait = (target - COLLECT_LEAD - now).total_seconds()
+            if wait > 0:
+                print(f"{target:%H:%M} 보고 — 수집 시작까지 {wait / 60:.0f}분 대기")
+                time.sleep(wait)
+            else:
+                print(f"{target:%H:%M} 보고 — 예약 실행이 늦게 시작해 바로 수집")
+            return target
+    return None
+
+
+def set_deadline(slot):
+    """접속 재시도를 멈출 시각: 보낼 시각 1분 전. 이미 늦었거나 수동 실행이면 지금부터 LATE_BUDGET"""
+    now = datetime.now()
+    end = slot - timedelta(minutes=1) if slot else now
+    if slot is None or slot <= now:
+        end = now + LATE_BUDGET
+    end = max(end, now + timedelta(minutes=2))   # 막 늦게 시작했어도 한 번씩은 읽어 볼 시간
+    sources.DEADLINE = end.timestamp()
+    print(f"접속 재시도는 {end:%H:%M:%S}까지")
 
 
 def main():
@@ -129,9 +149,11 @@ def main():
     if not test_days and not is_workday(now.date()) and os.environ.get("FORCE", "").lower() != "true":
         print("주말·공휴일이라 건너뜀")
         return
+    slot = None
     if os.environ.get("WAIT_FOR_SLOT", "").lower() == "true" and not test_days:
-        wait_for_slot()
+        slot = wait_for_slot()
         now = datetime.now()
+    set_deadline(slot)
     state = load_state()
     if test_days:
         since = now - timedelta(days=test_days)
@@ -162,8 +184,14 @@ def main():
     picks = [it for it in new if report.is_opportunity(it)]
     if picks:
         lines += [f"★ 사업참여 기회 {len(picks)}건"] + [f"· {it['title'][:60]}" for it in picks[:5]]
-    lines += [f"⚠ {s} 확인 실패: {e[:80]}" for s, e in errors.items()]
+    lines += [f"⚠ {s} 접속이 되지 않아 확인 못 함 — 직접 확인하세요 {SITE_URLS.get(s, '')}".rstrip() for s in errors]
     print(title, *lines, sep="\n")
+    for s, e in errors.items():
+        print(f"  {s}: {e}")
+    if slot and datetime.now() < slot:   # 일찍 끝났으면 보낼 시각까지 기다렸다 보낸다
+        wait = (slot - datetime.now()).total_seconds()
+        print(f"{slot:%H:%M}까지 {wait:.0f}초 기다렸다 전송")
+        time.sleep(wait)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID") or (find_chat(token) if token else None)
