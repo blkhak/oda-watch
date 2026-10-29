@@ -16,6 +16,7 @@ jobs:
         run: curl -s https://ipinfo.io/json | grep -E '"(ip|city|org)"'
       - name: 이름(SNI)·TLS 버전·포트 바꿔 시험
         run: |
+          set +e   # 실패도 결과로 기록
           EX=39.115.136.135; ED=39.115.136.155
           t() { r=$(curl -s -o /dev/null -A "Mozilla/5.0" --max-time 15 -w "코드=%{http_code} 바이트=%{size_download} 종료=%{exitcode}" "${@:2}" 2>/dev/null); echo "$1 → $r"; }
           # 첫 인사(ClientHello)만 보내 보고 서버가 끊는지(errno=104) 응답하는지(Cipher) 본다 — 데이터는 주고받지 않음
