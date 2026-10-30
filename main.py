@@ -149,11 +149,11 @@ def main():
     if not test_days and not is_workday(now.date()) and os.environ.get("FORCE", "").lower() != "true":
         print("주말·공휴일이라 건너뜀")
         return
-    slot = None
+    send_at = None   # 보낼 시각 (예약 실행일 때만)
     if os.environ.get("WAIT_FOR_SLOT", "").lower() == "true" and not test_days:
-        slot = wait_for_slot()
+        send_at = wait_for_slot()
         now = datetime.now()
-    set_deadline(slot)
+    set_deadline(send_at)
     state = load_state()
     if test_days:
         since = now - timedelta(days=test_days)
@@ -188,9 +188,9 @@ def main():
     print(title, *lines, sep="\n")
     for s, e in errors.items():
         print(f"  {s}: {e}")
-    if slot and datetime.now() < slot:   # 일찍 끝났으면 보낼 시각까지 기다렸다 보낸다
-        wait = (slot - datetime.now()).total_seconds()
-        print(f"{slot:%H:%M}까지 {wait:.0f}초 기다렸다 전송")
+    if send_at and datetime.now() < send_at:   # 일찍 끝났으면 보낼 시각까지 기다렸다 보낸다
+        wait = (send_at - datetime.now()).total_seconds()
+        print(f"{send_at:%H:%M}까지 {wait:.0f}초 기다렸다 전송")
         time.sleep(wait)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
