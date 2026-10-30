@@ -10,29 +10,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3]   # 서로 다른 실행 서버(IP)에서 같은 시험
+        n: [1, 2]
     steps:
       - uses: actions/checkout@v4
-      - name: 실행 서버 IP
-        run: curl -s https://ipinfo.io/json | grep -E '"(ip|city|org)"'
-      - name: 실제 수집 코드로 요청마다 기록 (2회 반복)
+      - name: 수출입은행 15회 — 짧게 받은 내용과 끝부분 기록
         env:
-          TZ: Asia/Seoul
           PYTHONIOENCODING: utf-8
         run: |
           python - <<'EOF'
-          import time, sources
-          orig = sources.subprocess.run
-          def run(cmd, **k):
-              t = time.time(); r = orig(cmd, **k)
-              print(f"{time.strftime('%H:%M:%S')} 종료={r.returncode} {len(r.stdout)}B {time.time() - t:.1f}s {cmd[-1][:95]}", flush=True)
-              return r
-          sources.subprocess.run = run
-          for rnd in (1, 2):
-              for name, fn in [("EDCF", sources.edcf), ("수출입은행", sources.exim)]:
-                  sources.DEADLINE = time.time() + 240
-                  try:
-                      print(f"[{rnd}회] {name} 성공 {len(fn())}건", flush=True)
-                  except Exception as e:
-                      print(f"[{rnd}회] {name} 실패 {e}", flush=True)
+          import subprocess, time, sources
+          url = "https://www.koreaexim.go.kr/HPHKBI039M01"
+          shown = False
+          for i in range(15):
+              t = time.time()
+              r = subprocess.run(["curl", "-s", "-S", "-L", "-b", "", "-D", "-", "--max-time", "20", "-A", sources.UA, *sources.ca_bundle(url), url], capture_output=True)
+              body = r.stdout.decode("utf-8", "replace")
+              print(f"#{i + 1} {time.strftime('%H:%M:%S')} 종료={r.returncode} {len(r.stdout)}B {time.time() - t:.1f}s </html>로끝남={body.rstrip().endswith('</html>')} 오류={r.stderr.decode()[:120].strip()}", flush=True)
+              if len(r.stdout) < 5000 and r.stdout and not shown:
+                  print("---- 짧은 응답 전체 ----\n" + body + "\n----", flush=True); shown = True
+              time.sleep(3)
           EOF
