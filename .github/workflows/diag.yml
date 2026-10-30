@@ -12,23 +12,27 @@ jobs:
       matrix:
         n: [1, 2, 3]   # 서로 다른 실행 서버(IP)에서 같은 시험
     steps:
+      - uses: actions/checkout@v4
       - name: 실행 서버 IP
         run: curl -s https://ipinfo.io/json | grep -E '"(ip|city|org)"'
-      - name: 이름(SNI)·TLS 버전·포트 바꿔 시험
+      - name: 실제 수집 코드로 요청마다 기록 (2회 반복)
+        env:
+          TZ: Asia/Seoul
+          PYTHONIOENCODING: utf-8
         run: |
-          set +e   # 실패도 결과로 기록
-          EX=39.115.136.135; ED=39.115.136.155
-          t() { r=$(curl -s -o /dev/null -A "Mozilla/5.0" --max-time 15 -w "코드=%{http_code} 바이트=%{size_download} 종료=%{exitcode}" "${@:2}" 2>/dev/null); echo "$1 → $r"; }
-          # 첫 인사(ClientHello)만 보내 보고 서버가 끊는지(errno=104) 응답하는지(Cipher) 본다 — 데이터는 주고받지 않음
-          h() { r=$(timeout 15 openssl s_client -connect "$2" "${@:3}" </dev/null 2>&1 | grep -oE "errno=[0-9]+|Cipher is [A-Z0-9_()]+" | head -1); echo "$1 → ${r:-응답 없음}"; }
-          t "수출입은행 그대로            " https://www.koreaexim.go.kr/HPHKBI039M01
-          t "수출입은행 첫 화면           " https://www.koreaexim.go.kr/
-          t "수출입은행 80번(암호화 없음) " http://www.koreaexim.go.kr/HPHKBI039M01
-          t "수출입은행 TLS1.2            " --tlsv1.2 --tls-max 1.2 https://www.koreaexim.go.kr/HPHKBI039M01
-          t "EDCF 그대로                  " https://www.edcfkorea.go.kr/fe/HPHFFE065M01
-          h "수출입은행 서버 + 수출입은행 이름" $EX:443 -servername www.koreaexim.go.kr
-          h "수출입은행 서버 + EDCF 이름      " $EX:443 -servername www.edcfkorea.go.kr
-          h "수출입은행 서버 + 이름 없음      " $EX:443 -noservername
-          h "EDCF 서버 + EDCF 이름            " $ED:443 -servername www.edcfkorea.go.kr
-          h "EDCF 서버 + 수출입은행 이름      " $ED:443 -servername www.koreaexim.go.kr
-          h "수출입은행 서버 TLS1.2           " $EX:443 -servername www.koreaexim.go.kr -tls1_2
+          python - <<'EOF'
+          import time, sources
+          orig = sources.subprocess.run
+          def run(cmd, **k):
+              t = time.time(); r = orig(cmd, **k)
+              print(f"{time.strftime('%H:%M:%S')} 종료={r.returncode} {len(r.stdout)}B {time.time() - t:.1f}s {cmd[-1][:95]}", flush=True)
+              return r
+          sources.subprocess.run = run
+          for rnd in (1, 2):
+              for name, fn in [("EDCF", sources.edcf), ("수출입은행", sources.exim)]:
+                  sources.DEADLINE = time.time() + 240
+                  try:
+                      print(f"[{rnd}회] {name} 성공 {len(fn())}건", flush=True)
+                  except Exception as e:
+                      print(f"[{rnd}회] {name} 실패 {e}", flush=True)
+          EOF
