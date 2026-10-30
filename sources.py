@@ -49,9 +49,16 @@ def get(url, timeout=30, retries=5):
     for attempt in range(retries):
         r = subprocess.run(["curl", "-s", "-L", "-b", "", "--max-time", str(max(5, int(min(timeout, left())))),
                             "-A", UA, *ca_bundle(url), url], capture_output=True)
+        body = r.stdout.decode("utf-8", "replace")
         if r.returncode == 0 and r.stdout:
-            return r.stdout.decode("utf-8", "replace")
-        pause = 15 * 2 ** attempt   # 해외(GitHub) 접속을 서버가 가끔 끊는다: 15·30·60·120초 쉬고 다시
+            return body
+        # 수출입은행 망 보안장비는 처음 보는 해외 IP의 첫 연결을 끊고(curl 35), 다음 연결은 페이지를 끝까지 보낸 뒤
+        # 종료 인사 없이 끊는다(curl 56). 끝(</html>)까지 받은 페이지는 버리지 않는다 (인증서 검증은 그대로)
+        if r.returncode == 56 and body.rstrip().lower().endswith("</html>"):
+            print(f"  {url.split('?')[0]} 페이지는 다 받았으나 연결이 비정상 종료(curl 56) → 받은 내용 사용")
+            return body
+        print(f"  {url.split('?')[0]} 접속 {attempt + 1}회 실패 (curl {r.returncode}, {len(r.stdout)}B)")
+        pause = [3, 15, 30, 60][min(attempt, 3)]   # 첫 실패는 곧바로 다시(보안장비가 두세 번째 연결부터 통과시킴)
         if attempt == retries - 1 or pause + 5 > left():
             break
         time.sleep(pause)
